@@ -258,6 +258,15 @@ class TestBuildPreamble:
         assert "실행기가 이 시도를 실패로 처리한다" in result
         assert "다른 step의 상태" in result
 
+    def test_test_files_are_exempt_from_no_extra_files(self, executor):
+        result = executor._build_preamble("", "")
+        assert "추가 기능이나 파일을 만들지 마라. 테스트 파일은 예외다." in result
+
+    def test_forbids_weakening_existing_tests(self, executor):
+        result = executor._build_preamble("", "")
+        assert "기존 테스트의 기대값을 바꾸거나 테스트를 지우지 마라" in result
+        assert "summary에 이유를 적어라" in result
+
     def test_says_executor_reverifies(self, executor):
         result = executor._build_preamble("", "")
         assert "실행기가 AC로 다시 검증한다" in result
