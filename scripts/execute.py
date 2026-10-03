@@ -36,10 +36,12 @@ FENCE = re.compile(r"^\s*(`{3,})\s*(\S*)")
 
 @contextlib.contextmanager
 def progress_indicator(label: str):
-    """터미널 진행 표시기. with 문으로 사용하며 .elapsed 로 경과 시간을 읽는다."""
+    """터미널 진행 표시기. with 문으로 사용하며 .elapsed 로 경과 시간을 읽는다.
+    stderr가 터미널이 아니면(로그 파일, Claude의 Bash 도구) 프레임이 글자로 쌓이므로 그리지 않는다."""
     frames = "◐◓◑◒"
     stop = threading.Event()
     t0 = time.monotonic()
+    animate = sys.stderr.isatty()
 
     def _animate():
         idx = 0
@@ -52,13 +54,15 @@ def progress_indicator(label: str):
         sys.stderr.flush()
 
     th = threading.Thread(target=_animate, daemon=True)
-    th.start()
+    if animate:
+        th.start()
     info = types.SimpleNamespace(elapsed=0.0)
     try:
         yield info
     finally:
         stop.set()
-        th.join()
+        if animate:
+            th.join()
         info.elapsed = time.monotonic() - t0
 
 
@@ -632,6 +636,8 @@ class StepExecutor:
 
 
 def main():
+    # 파일로 보내도 진행 줄이 실행 중에 바로 보이게 한다
+    sys.stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description="Harness Step Executor")
     parser.add_argument("phase_dir", help="Phase directory name (e.g. 0-mvp)")
     parser.add_argument("--push", action="store_true", help="Push branch after completion")

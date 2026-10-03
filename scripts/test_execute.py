@@ -3,6 +3,7 @@ execute.py 리팩터링 안전망 테스트.
 리팩터링 전후 동작이 동일한지 검증한다.
 """
 
+import io
 import json
 import os
 import shlex
@@ -516,6 +517,26 @@ class TestProgressIndicator:
             time.sleep(0.2)
         assert pi.elapsed > 0
 
+    def test_no_animation_when_not_a_terminal(self):
+        """로그 파일이나 Claude의 Bash 도구로 보낼 때 프레임이 쌓이지 않아야 한다."""
+        buf = io.StringIO()
+        with patch.object(ex.sys, "stderr", buf):
+            with ex.progress_indicator("test") as pi:
+                time.sleep(0.3)
+        assert buf.getvalue() == ""
+        assert pi.elapsed >= 0.25
+
+    def test_animates_on_terminal(self):
+        class Tty(io.StringIO):
+            def isatty(self):
+                return True
+
+        buf = Tty()
+        with patch.object(ex.sys, "stderr", buf):
+            with ex.progress_indicator("test"):
+                time.sleep(0.3)
+        assert "◐ test" in buf.getvalue()
+
 
 # ---------------------------------------------------------------------------
 # main() CLI 파싱 (mocked)
@@ -534,6 +555,29 @@ class TestMainCli:
                 with pytest.raises(SystemExit) as exc_info:
                     ex.main()
                 assert exc_info.value.code == 1
+
+    def test_stdout_is_line_buffered(self):
+        """출력을 파일로 보내도 진행 줄이 끝날 때가 아니라 실행 중에 바로 보여야 한다."""
+        code = textwrap.dedent(f"""
+            import sys, time
+            sys.path.insert(0, {str(Path(ex.__file__).parent)!r})
+            import execute
+            execute.StepExecutor.__init__ = lambda self, *a, **k: None
+            def run(self):
+                print("progress")
+                time.sleep(10)
+            execute.StepExecutor.run = run
+            sys.argv = ["execute.py", "x"]
+            execute.main()
+        """)
+        p = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+        try:
+            t0 = time.monotonic()
+            assert p.stdout.readline() == "progress\n"
+            assert time.monotonic() - t0 < 5
+        finally:
+            p.kill()
+            p.wait()
 
     def test_missing_index_exits(self, tmp_project):
         (tmp_project / "phases" / "empty").mkdir()
