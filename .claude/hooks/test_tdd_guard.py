@@ -80,9 +80,18 @@ class TestJsTs:
         "src/app/loading.tsx",
         "src/app/error.tsx",
         "src/app/not-found.tsx",
+        "src/app/page.js",
+        "src/app/layout.jsx",
+        "src/app/loading.ts",
+        "src/app/error.js",
+        "src/app/not-found.jsx",
     ])
     def test_exempt(self, tmp_path, rel):
         assert check(tmp_path, rel) is None
+
+    @pytest.mark.parametrize("rel", ["src/app/pages.js", "src/lib/error-utils.ts"])
+    def test_nextjs_exemption_needs_exact_name(self, tmp_path, rel):
+        assert check(tmp_path, rel) is not None
 
     @pytest.mark.parametrize("rel", ["src/lib/latest.ts", "src/lib/inspector.ts"])
     def test_name_containing_test_or_spec_is_not_exempt(self, tmp_path, rel):

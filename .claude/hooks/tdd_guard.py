@@ -18,12 +18,9 @@ from typing import List, Optional
 TEST_DIRS = {"tests", "__tests__"}
 
 JS_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
-JS_EXEMPT_NAMES = {
-    "types.ts",
-    # Next.js 프레임워크 파일
-    "layout.tsx", "layout.ts", "page.tsx", "page.ts",
-    "loading.tsx", "error.tsx", "not-found.tsx",
-}
+JS_EXEMPT_NAMES = {"types.ts"}
+# Next.js 프레임워크 파일. 확장자와 상관없이 이름으로 면제한다.
+JS_EXEMPT_STEMS = {"layout", "page", "loading", "error", "not-found"}
 JS_EXEMPT_DIRS = {"types"}
 
 PY_EXEMPT_NAMES = {"__init__.py", "conftest.py", "setup.py"}
@@ -36,7 +33,7 @@ def _js_candidates(rel: PurePosixPath, ext: str) -> Optional[List[PurePosixPath]
     stem = name[: -len(ext)]
     if ".test." in name or ".spec." in name:
         return None
-    if name in JS_EXEMPT_NAMES or name.endswith(".d.ts") or ".config." in name:
+    if name in JS_EXEMPT_NAMES or stem in JS_EXEMPT_STEMS or name.endswith(".d.ts") or ".config." in name:
         return None
     if JS_EXEMPT_DIRS & set(rel.parent.parts):
         return None
