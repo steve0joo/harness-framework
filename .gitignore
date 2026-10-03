@@ -4,6 +4,18 @@ out/
 next-env.d.ts
 tsconfig.tsbuildinfo
 
+# python
+.venv/
+__pycache__/
+.pytest_cache/
+
+# secrets (예시 파일은 커밋)
+.env
+.env.*
+!.env*.example
+
+.DS_Store
+
 # phase execution outputs
 phases/**/phase*-output.json
 phases/**/step*-output.json
