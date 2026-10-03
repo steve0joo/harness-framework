@@ -93,6 +93,14 @@ class TestJsTs:
     def test_nextjs_exemption_needs_exact_name(self, tmp_path, rel):
         assert check(tmp_path, rel) is not None
 
+    @pytest.mark.parametrize("rel", ["vitest.setup.ts", "jest.setup.js", "src/setupTests.ts"])
+    def test_test_setup_files_exempt(self, tmp_path, rel):
+        assert check(tmp_path, rel) is None
+
+    @pytest.mark.parametrize("rel", ["src/lib/setup.ts", "src/lib/setup-db.ts", "src/lib/db.setup.ts"])
+    def test_test_setup_exemption_needs_exact_name(self, tmp_path, rel):
+        assert check(tmp_path, rel) is not None
+
     @pytest.mark.parametrize("rel", ["src/lib/latest.ts", "src/lib/inspector.ts"])
     def test_name_containing_test_or_spec_is_not_exempt(self, tmp_path, rel):
         # 기존 가드는 *test*, *spec* 매칭으로 이 파일들을 통과시켰다.
@@ -172,6 +180,25 @@ class TestOtherFiles:
 
 
 # ---------------------------------------------------------------------------
+# 이미 있는 파일 (스캐폴딩 도구가 만든 파일, 기존 코드)
+# ---------------------------------------------------------------------------
+
+class TestExistingFiles:
+    @pytest.mark.parametrize("rel", ["src/main.tsx", "src/lib/foo.ts", "app/service.py", "myproj/settings.py"])
+    def test_existing_file_without_test_allowed(self, tmp_path, rel):
+        touch(tmp_path, rel)
+        assert check(tmp_path, rel) is None
+
+    def test_new_file_beside_existing_one_still_guarded(self, tmp_path):
+        touch(tmp_path, "src/lib/foo.ts")
+        assert check(tmp_path, "src/lib/bar.ts") is not None
+
+    def test_directory_with_impl_name_still_guarded(self, tmp_path):
+        (tmp_path / "src" / "lib" / "foo.ts").mkdir(parents=True)
+        assert check(tmp_path, "src/lib/foo.ts") is not None
+
+
+# ---------------------------------------------------------------------------
 # hook 입출력 (실제 프로세스)
 # ---------------------------------------------------------------------------
 
@@ -184,6 +211,11 @@ class TestMain:
     def test_allow_exits_0(self, tmp_path):
         touch(tmp_path, "src/lib/foo.test.ts")
         code, _ = run_hook(tmp_path, edit(tmp_path / "src/lib/foo.ts", tmp_path))
+        assert code == 0
+
+    def test_existing_file_exits_0(self, tmp_path):
+        touch(tmp_path, "src/App.tsx")
+        code, _ = run_hook(tmp_path, edit(tmp_path / "src/App.tsx", tmp_path))
         assert code == 0
 
     def test_relative_path_resolved_from_cwd(self, tmp_path):

@@ -27,7 +27,7 @@ src/
 {상태를 어디에 두고 누가 바꾸는지. 해당 없으면 섹션 삭제}
 
 ## 테스트 배치
-TDD 가드는 구현 파일을 쓰기 전에 아래 위치의 짝 테스트가 있는지 확인한다. 다른 위치에 두면 구현 파일 수정이 막힌다.
+TDD 가드는 새 구현 파일을 만들기 전에 아래 위치의 짝 테스트가 있는지 확인한다. 다른 위치에 두면 새 구현 파일을 만들 수 없다. 이미 있는 파일의 편집은 막지 않는다.
 - JS/TS `<dir>/foo.ts`: `<dir>/foo.test.ts`, `<dir>/foo.spec.ts`, `<dir>/__tests__/foo.test.ts`
 - Python `<dir>/foo.py`: `<dir>/test_foo.py`, `<dir>/foo_test.py`, `<dir>/tests/test_foo.py`, `tests/<dir>/test_foo.py` (`<dir>` 맨 앞의 `src/`는 뺀다)
 - `tests/` 아래에서는 소스 경로를 그대로 따른다. `src/users/service.py`의 테스트는 `tests/users/test_service.py`이고, 이름만 같은 `tests/test_service.py`는 짝으로 인정되지 않는다.

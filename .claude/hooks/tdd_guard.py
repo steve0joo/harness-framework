@@ -2,7 +2,8 @@
 """
 TDD Guard Hook — PreToolUse[Edit|Write]
 
-구현 파일을 쓰기 전에 짝 테스트 파일이 있는지 확인한다. 없으면 exit 2로 막는다.
+새 구현 파일을 만들기 전에 짝 테스트 파일이 있는지 확인한다. 없으면 exit 2로 막는다.
+이미 있는 파일(스캐폴딩 도구가 만든 파일, 기존 코드)의 편집은 막지 않는다.
 테스트 파일이 '있는지'만 본다. 실제 동작 검증은 execute.py의 AC 게이트가 맡는다.
 Bash로 쓰는 파일은 범위 밖이다.
 
@@ -21,6 +22,8 @@ JS_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
 JS_EXEMPT_NAMES = {"types.ts"}
 # Next.js 프레임워크 파일. 확장자와 상관없이 이름으로 면제한다.
 JS_EXEMPT_STEMS = {"layout", "page", "loading", "error", "not-found"}
+# 테스트 환경 설정 파일. 구현이 아니라 테스트 쪽 파일이다.
+JS_TEST_SETUP_STEMS = {"vitest.setup", "jest.setup", "setupTests"}
 JS_EXEMPT_DIRS = {"types"}
 
 PY_EXEMPT_NAMES = {"__init__.py", "conftest.py", "setup.py"}
@@ -31,7 +34,7 @@ def _js_candidates(rel: PurePosixPath, ext: str) -> Optional[List[PurePosixPath]
     """검사 대상이면 짝 테스트 후보 목록, 테스트 파일이거나 면제면 None."""
     name = rel.name
     stem = name[: -len(ext)]
-    if ".test." in name or ".spec." in name:
+    if ".test." in name or ".spec." in name or stem in JS_TEST_SETUP_STEMS:
         return None
     if name in JS_EXEMPT_NAMES or stem in JS_EXEMPT_STEMS or name.endswith(".d.ts") or ".config." in name:
         return None
@@ -63,7 +66,7 @@ def _py_candidates(rel: PurePosixPath) -> Optional[List[PurePosixPath]]:
 
 def check(rel: PurePosixPath, root: Path) -> Optional[str]:
     """rel(프로젝트 루트 기준 상대경로)을 막아야 하면 사유를, 아니면 None을 돌려준다."""
-    if TEST_DIRS & set(rel.parent.parts):
+    if (root / rel).is_file() or TEST_DIRS & set(rel.parent.parts):
         return None
 
     ext = rel.suffix
