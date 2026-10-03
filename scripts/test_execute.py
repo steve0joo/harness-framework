@@ -252,9 +252,11 @@ class TestBuildPreamble:
         assert "커밋하지 마라" in result
         assert "feat(mvp):" not in result
 
-    def test_forbids_editing_ac_docs_and_other_steps(self, executor):
+    def test_forbids_editing_protected_files_and_other_steps(self, executor):
         result = executor._build_preamble("", "")
-        assert "AC 블록, docs/, CLAUDE.md, 다른 step의 상태를 수정하지 마라" in result
+        assert "하네스 파일(.claude/, scripts/execute.py), docs/, CLAUDE.md, step 파일을 수정하지 마라" in result
+        assert "실행기가 이 시도를 실패로 처리한다" in result
+        assert "다른 step의 상태" in result
 
     def test_says_executor_reverifies(self, executor):
         result = executor._build_preamble("", "")
@@ -828,6 +830,7 @@ class TestEnforcement:
     @staticmethod
     def run_step0(runner, repo):
         runner._load_acs()
+        runner._freeze_protected()
         runner._execute_single_step(read_index(repo)["steps"][0], "")
 
     def test_agent_cannot_confirm_or_touch_other_steps(self, runner, repo):
@@ -864,6 +867,42 @@ class TestEnforcement:
         assert log(repo) == ["chore(mvp): step 0 output", "feat(mvp): step 0 — first", "init"]
         assert "a.txt" in git(repo, "show", "--name-only", "--format=", "HEAD~1")
         assert "reset --soft" in capsys.readouterr().out
+
+    def test_protected_file_change_fails_attempt(self, runner, repo):
+        hook = repo / ".claude" / "hooks" / "tdd_guard.py"
+
+        def tamper(step):
+            hook.parent.mkdir(parents=True)
+            hook.write_text("")
+            (repo / "CLAUDE.md").write_text("# 바뀐 규칙")
+            work(repo, "a.txt", "ok")(step)
+
+        def restore(step):
+            hook.unlink()
+            (repo / "CLAUDE.md").write_text("# Rules")
+            work(repo, "a.txt", "ok")(step)
+
+        calls = fake_agent(runner, tamper, restore)
+        self.run_step0(runner, repo)
+        assert "보호 파일 변경: .claude/hooks/tdd_guard.py, CLAUDE.md" in calls[1][1]
+        assert read_index(repo)["steps"][0]["completed_at"]
+
+    def test_protected_baseline_is_run_start_not_head(self, runner, repo):
+        (repo / "CLAUDE.md").write_text("# 사용자가 실행 전에 고친 규칙")
+        fake_agent(runner, work(repo, "a.txt", "ok"))
+        self.run_step0(runner, repo)
+        assert read_index(repo)["steps"][0]["completed_at"]
+
+    def test_pycache_in_protected_dir_is_ignored(self, runner, repo):
+        def compile_hooks(step):
+            cache = repo / ".claude" / "hooks" / "__pycache__"
+            cache.mkdir(parents=True)
+            (cache / "bash_guard.cpython-312.pyc").write_bytes(b"x")
+            work(repo, "a.txt", "ok")(step)
+
+        fake_agent(runner, compile_hooks)
+        self.run_step0(runner, repo)
+        assert read_index(repo)["steps"][0]["completed_at"]
 
     def test_changed_ac_is_judged_by_frozen_copy(self, runner, repo):
         def cheat(step):

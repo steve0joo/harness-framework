@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -67,6 +68,9 @@ class StepExecutor:
     MAX_RETRIES = 3
     AC_TIMEOUT = 600
     AGENT_FIELDS = ("status", "summary", "error_message", "blocked_reason")
+    # 에이전트가 바꾸면 안 되는 경로. 이 phase의 step 파일도 함께 지킨다.
+    PROTECTED = (".claude/hooks", ".claude/settings.json", ".claude/settings.local.json",
+                 "scripts/execute.py", "CLAUDE.md", "docs")
     FEAT_MSG = "feat({phase}): step {num} — {name}"
     CHORE_MSG = "chore({phase}): step {num} output"
     TZ = timezone(timedelta(hours=9))
@@ -100,6 +104,7 @@ class StepExecutor:
         self._checkout_branch()
         guardrails = self._load_guardrails()
         self._load_acs()
+        self._freeze_protected()
         self._ensure_created_at()
         self._execute_all_steps(guardrails)
         self._finalize()
@@ -244,7 +249,8 @@ class StepExecutor:
             f"   - AC를 통과시키지 못함 → \"error\" + \"error_message\"에 구체적인 원인 기록\n"
             f"   - 사용자 개입이 필요한 경우 (API 키, 인증, 수동 설정 등) → \"blocked\" + \"blocked_reason\" 기록 후 즉시 중단\n"
             f"6. 커밋하지 마라. 실행기가 검증한 뒤 커밋한다.\n"
-            f"7. AC 블록, docs/, CLAUDE.md, 다른 step의 상태를 수정하지 마라.\n\n---\n\n"
+            f"7. 하네스 파일(.claude/, scripts/execute.py), docs/, CLAUDE.md, step 파일을 수정하지 마라. "
+            f"바뀌면 실행기가 이 시도를 실패로 처리한다. 다른 step의 상태도 수정하지 마라.\n\n---\n\n"
         )
 
     # --- Claude 호출 ---
@@ -335,6 +341,36 @@ class StepExecutor:
             for e in errors:
                 print(f"    - {e}")
             sys.exit(1)
+
+    # --- 보호 파일 ---
+
+    def _protected_snapshot(self) -> dict:
+        """보호 경로 아래 파일의 내용 해시. __pycache__와 .DS_Store는 실행 중에 저절로 생기므로 뺀다."""
+        root = Path(self._root)
+        roots = [root / p for p in self.PROTECTED] + sorted(self._phase_dir.glob("step*.md"))
+        snap = {}
+        for r in roots:
+            files = [r] if r.is_file() else r.rglob("*")
+            for f in files:
+                if f.is_file() and "__pycache__" not in f.parts and f.name != ".DS_Store":
+                    snap[f.relative_to(root).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
+        return snap
+
+    def _freeze_protected(self):
+        """실행 시작 때의 보호 파일 상태를 기준으로 기록한다. HEAD가 아니라 이 시점이 기준이다."""
+        self._protected = self._protected_snapshot()
+
+    def _check_protected(self) -> Optional[str]:
+        """보호 파일이 기준과 달라졌으면 재시도용 메시지, 같으면 None."""
+        now = self._protected_snapshot()
+        changed = sorted(p for p in self._protected.keys() | now.keys() if self._protected.get(p) != now.get(p))
+        if not changed:
+            return None
+        return (
+            f"보호 파일 변경: {', '.join(changed)}\n\n"
+            f"이 파일들을 실행 시작 때 상태로 되돌려라. 추적 중인 파일은 `git checkout -- <파일>`로 되돌리고, "
+            f"새로 만든 파일은 지운다."
+        )
 
     # --- AC 게이트 ---
 
@@ -493,6 +529,8 @@ class StepExecutor:
             elapsed = int(pi.elapsed)
             s = self._find_step(index, step_num)
 
+            if err_msg is None:
+                err_msg = self._check_protected()
             if err_msg is None:
                 if s["status"] == "completed":
                     err_msg = self._gate(step_num)

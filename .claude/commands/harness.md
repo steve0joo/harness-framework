@@ -221,6 +221,7 @@ execute.py가 자동으로 처리하는 것:
 - 가드레일 주입 — CLAUDE.md + docs/*.md 내용을 매 step 프롬프트에 포함
 - 컨텍스트 누적 — 완료된 step의 summary를 다음 step 프롬프트에 전달
 - AC 게이트 출력을 피드백 — completed 보고 뒤 고정된 AC를 직접 실행하고, 실패하면 출력 끝부분을 다음 프롬프트에 넣어 최대 3회까지 재시도한다. Claude 호출 시간 초과(1800초)도 한 번의 시도로 센다
+- 보호 파일 검사 — 에이전트 호출 뒤 하네스 파일(`.claude/hooks/`, `.claude/settings*.json`, `scripts/execute.py`), CLAUDE.md, `docs/`, step 파일이 실행 시작 때와 달라졌으면 그 시도를 실패로 처리하고 바뀐 파일 목록을 다음 프롬프트에 넣는다
 - 검증 통과 후 2단계 커밋 — 코드 변경(`feat`)과 메타데이터(`chore`)를 분리 커밋. 에이전트는 커밋하지 않음 (에이전트가 커밋하면 `reset --soft`로 되돌림)
 - 타임스탬프 — started_at, completed_at, failed_at, blocked_at 자동 기록
 
