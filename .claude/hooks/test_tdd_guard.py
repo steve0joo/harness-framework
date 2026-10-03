@@ -213,9 +213,10 @@ class TestMain:
         code, _ = run_hook(tmp_path, edit(tmp_path / "src/lib/foo.ts", tmp_path))
         assert code == 0
 
-    def test_existing_file_exits_0(self, tmp_path):
-        touch(tmp_path, "src/App.tsx")
-        code, _ = run_hook(tmp_path, edit(tmp_path / "src/App.tsx", tmp_path))
+    @pytest.mark.parametrize("rel", ["src/App.tsx", "app/service.py"])
+    def test_existing_file_exits_0(self, tmp_path, rel):
+        touch(tmp_path, rel)
+        code, _ = run_hook(tmp_path, edit(tmp_path / rel, tmp_path))
         assert code == 0
 
     def test_relative_path_resolved_from_cwd(self, tmp_path):
