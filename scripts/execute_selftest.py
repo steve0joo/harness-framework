@@ -1,6 +1,9 @@
 """
 execute.py 리팩터링 안전망 테스트.
 리팩터링 전후 동작이 동일한지 검증한다.
+
+하네스 자체 테스트라 test_ 접두사를 붙이지 않는다. 붙이면 이 하네스로 만든 프로젝트의
+`pytest` 전체 실행에 섞여 AC마다 같이 돈다. 실행: python3 -m pytest scripts/execute_selftest.py .claude/hooks -q
 """
 
 import io
