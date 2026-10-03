@@ -2,23 +2,39 @@
 
 ## 디렉토리 구조
 ```
+{프로젝트 디렉토리 트리. 폴더마다 역할을 한 줄로 (예:
 src/
-├── app/               # 페이지 + API 라우트
-├── components/        # UI 컴포넌트
-├── types/             # TypeScript 타입 정의
-├── lib/               # 유틸리티 + 헬퍼
-└── services/          # 외부 API 래퍼
+├── api/          # 요청 처리
+├── services/     # 비즈니스 로직
+└── storage/      # 저장소 접근
+)}
 ```
 
 ## 패턴
-{사용하는 디자인 패턴 (예: Server Components 기본, 인터랙션이 필요한 곳만 Client Component)}
+{주요 구성요소의 역할과 경계, 사용하는 디자인 패턴 (예: 핸들러는 입출력만, 로직은 services에)}
 
 ## 데이터 흐름
 ```
 {데이터가 어떻게 흐르는지 (예:
-사용자 입력 → Client Component → API Route → 외부 API → 응답 → UI 업데이트
+사용자 입력 → 핸들러 → 서비스 → 저장소 → 응답
 )}
 ```
 
+## 데이터 모델
+{핵심 엔티티와 필드, 관계, 저장 위치}
+
 ## 상태 관리
-{상태 관리 방식 (예: 서버 상태는 Server Components, 클라이언트 상태는 useState/useReducer)}
+{상태를 어디에 두고 누가 바꾸는지. 해당 없으면 섹션 삭제}
+
+## 테스트 배치
+TDD 가드는 구현 파일을 쓰기 전에 아래 위치의 짝 테스트가 있는지 확인한다. 다른 위치에 두면 구현 파일 수정이 막힌다.
+- JS/TS `<dir>/foo.ts`: `<dir>/foo.test.ts`, `<dir>/foo.spec.ts`, `<dir>/__tests__/foo.test.ts`
+- Python `<dir>/foo.py`: `<dir>/test_foo.py`, `<dir>/foo_test.py`, `<dir>/tests/test_foo.py`, `tests/<dir>/test_foo.py` (`<dir>` 맨 앞의 `src/`는 뺀다)
+- `tests/` 아래에서는 소스 경로를 그대로 따른다. `src/users/service.py`의 테스트는 `tests/users/test_service.py`이고, 이름만 같은 `tests/test_service.py`는 짝으로 인정되지 않는다.
+
+이 프로젝트의 배치: {위 중 하나 (예: 같은 폴더에 둔다)}
+
+## 에러 처리·보안
+| 항목 | 등급 | 처리 |
+|------|------|------|
+| {예: 외부 API 시간 초과} | {필수 / 권장 / 나중} | {예: 5초 뒤 중단하고 재시도 안내} |

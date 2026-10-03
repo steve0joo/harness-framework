@@ -15,7 +15,7 @@
 - 커밋 메시지는 conventional commits 형식을 따를 것 (feat:, fix:, docs:, refactor:)
 
 ## 명령어
-npm run dev      # 개발 서버
-npm run build    # 프로덕션 빌드
-npm run lint     # ESLint
-npm run test     # 테스트
+<!-- 프로젝트 로컬 명령만 쓴다 (npx, python3 -m, uv run 등). step AC와 /review가 이 명령을 그대로 실행한다. 해당 없는 줄은 지운다. -->
+{lint 명령 (예: npx eslint . 또는 python3 -m ruff check .)}      # 린트
+{build 명령 (예: npm run build)}      # 빌드
+{test 명령 (예: npx vitest run 또는 python3 -m pytest -q)}      # 테스트
