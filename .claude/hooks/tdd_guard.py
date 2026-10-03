@@ -17,17 +17,19 @@ import sys
 from pathlib import Path, PurePosixPath
 from typing import List, Optional
 
-TEST_DIRS = {"tests", "__tests__"}
+TEST_DIRS = {"tests", "__tests__", "test", "__mocks__"}
 
 JS_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
 JS_EXEMPT_NAMES = {"types.ts"}
 # Next.js 프레임워크 파일. 확장자와 상관없이 이름으로 면제한다.
 JS_EXEMPT_STEMS = {"layout", "page", "loading", "error", "not-found"}
+# 엔트리포인트. 렌더링·실행만 하고 단위 테스트할 동작이 없다.
+JS_ENTRY_STEMS = {"main"}
 # 테스트 환경 설정 파일. 구현이 아니라 테스트 쪽 파일이다.
 JS_TEST_SETUP_STEMS = {"vitest.setup", "jest.setup", "setupTests"}
 JS_EXEMPT_DIRS = {"types"}
 
-PY_EXEMPT_NAMES = {"__init__.py", "conftest.py", "setup.py"}
+PY_EXEMPT_NAMES = {"__init__.py", "__main__.py", "conftest.py", "setup.py"}
 PY_EXEMPT_DIRS = {"migrations"}
 
 
@@ -37,7 +39,7 @@ def _js_candidates(rel: PurePosixPath, ext: str) -> Optional[List[PurePosixPath]
     stem = name[: -len(ext)]
     if ".test." in name or ".spec." in name or stem in JS_TEST_SETUP_STEMS:
         return None
-    if name in JS_EXEMPT_NAMES or stem in JS_EXEMPT_STEMS or name.endswith(".d.ts") or ".config." in name:
+    if name in JS_EXEMPT_NAMES or stem in JS_EXEMPT_STEMS | JS_ENTRY_STEMS or name.endswith(".d.ts") or ".config." in name:
         return None
     if JS_EXEMPT_DIRS & set(rel.parent.parts):
         return None

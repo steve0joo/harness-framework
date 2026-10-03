@@ -65,6 +65,9 @@ class TestJsTs:
         "src/lib/foo.test.ts",
         "src/lib/foo.spec.tsx",
         "src/__tests__/helpers.ts",
+        "test/helpers.js",
+        "__mocks__/axios.js",
+        "src/__mocks__/api.ts",
     ])
     def test_test_side_files_allowed(self, tmp_path, rel):
         assert check(tmp_path, rel) is None
@@ -85,6 +88,8 @@ class TestJsTs:
         "src/app/loading.ts",
         "src/app/error.js",
         "src/app/not-found.jsx",
+        "src/main.tsx",
+        "electron/main.js",
     ])
     def test_exempt(self, tmp_path, rel):
         assert check(tmp_path, rel) is None
@@ -156,6 +161,7 @@ class TestPython:
         "app/service_test.py",
         "tests/helpers.py",
         "app/tests/factories.py",
+        "test/helpers.py",
     ])
     def test_test_side_files_allowed(self, tmp_path, rel):
         assert check(tmp_path, rel) is None
@@ -165,9 +171,14 @@ class TestPython:
         "conftest.py",
         "setup.py",
         "app/migrations/0001_initial.py",
+        "src/pkg/__main__.py",
     ])
     def test_exempt(self, tmp_path, rel):
         assert check(tmp_path, rel) is None
+
+    def test_main_py_still_guarded(self, tmp_path):
+        # FastAPI 등에서 main.py는 라우트 같은 로직을 담는다.
+        assert check(tmp_path, "app/main.py") is not None
 
     def test_directory_exempt_matches_whole_component(self, tmp_path):
         assert check(tmp_path, "app/my_migrations_util.py") is not None
