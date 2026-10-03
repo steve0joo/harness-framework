@@ -260,6 +260,11 @@ class TestBuildPreamble:
         result = executor._build_preamble("", "")
         assert "실행기가 AC로 다시 검증한다" in result
 
+    def test_asks_for_general_logic_not_test_fitting(self, executor):
+        result = executor._build_preamble("", "")
+        assert "테스트는 동작을 검증하는 수단이다" in result
+        assert "일반적인 로직을 구현하라" in result
+
     def test_includes_rules(self, executor):
         result = executor._build_preamble("", "")
         assert "작업 규칙" in result
