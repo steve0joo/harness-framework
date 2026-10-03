@@ -5,9 +5,11 @@ execute.py 리팩터링 안전망 테스트.
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import textwrap
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -245,9 +247,18 @@ class TestBuildPreamble:
         result = executor._build_preamble("", ctx)
         assert "이전 Step 산출물" in result
 
-    def test_includes_commit_example(self, executor):
+    def test_forbids_commit(self, executor):
         result = executor._build_preamble("", "")
-        assert "feat(mvp):" in result
+        assert "커밋하지 마라" in result
+        assert "feat(mvp):" not in result
+
+    def test_forbids_editing_ac_docs_and_other_steps(self, executor):
+        result = executor._build_preamble("", "")
+        assert "AC 블록, docs/, CLAUDE.md, 다른 step의 상태를 수정하지 마라" in result
+
+    def test_says_executor_reverifies(self, executor):
+        result = executor._build_preamble("", "")
+        assert "실행기가 AC로 다시 검증한다" in result
 
     def test_includes_rules(self, executor):
         result = executor._build_preamble("", "")
@@ -263,9 +274,9 @@ class TestBuildPreamble:
         assert "이전 시도 실패" in result
         assert "타입 에러 발생" in result
 
-    def test_includes_max_retries(self, executor):
+    def test_retry_budget_not_delegated_to_agent(self, executor):
         result = executor._build_preamble("", "")
-        assert str(ex.StepExecutor.MAX_RETRIES) in result
+        assert "회 수정 시도" not in result
 
     def test_includes_index_path(self, executor):
         result = executor._build_preamble("", "")
@@ -557,3 +568,431 @@ class TestCheckBlockers:
         with pytest.raises(SystemExit) as exc_info:
             inst._check_blockers()
         assert exc_info.value.code == 2
+
+
+# ===========================================================================
+# R2: AC 계약 · 게이트 · 강제 장치 · 흐름 · 재개
+# 흐름 테스트는 임시 git 저장소와 실제 bash 게이트를 쓰고, claude만 가짜로 바꾼다.
+# ===========================================================================
+
+def ac_step(num, name, ac):
+    """AC 블록 하나를 가진 step 파일 내용."""
+    return (
+        f"# Step {num}: {name}\n\n## 작업\n\n{name} 작업\n\n"
+        f"## Acceptance Criteria\n\n```bash\n{ac}\n```\n\n"
+        f"## 검증 절차\n\n1. AC를 실행한다.\n"
+    )
+
+
+def extract(md):
+    return ex.StepExecutor._extract_ac(md)
+
+
+def git(root, *args):
+    r = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+    return r.stdout.strip()
+
+
+def log(root):
+    return git(root, "log", "--format=%s").splitlines()
+
+
+def read_index(root):
+    return json.loads((root / "phases" / "0-mvp" / "index.json").read_text())
+
+
+def report(root, num, status, **fields):
+    """에이전트처럼 index.json의 step 항목을 고친다."""
+    p = root / "phases" / "0-mvp" / "index.json"
+    idx = json.loads(p.read_text())
+    s = next(s for s in idx["steps"] if s["step"] == num)
+    s.update(status=status, **fields)
+    p.write_text(json.dumps(idx, indent=2))
+
+
+def work(root, filename, content):
+    """파일을 쓰고 completed를 보고하는 에이전트 동작."""
+    def act(step):
+        (root / filename).write_text(content)
+        report(root, step["step"], "completed", summary=f"{filename} 작성")
+    return act
+
+
+def fake_agent(runner, *actions):
+    """호출마다 actions를 차례로 실행하는 가짜 claude. (step 번호, preamble) 기록을 돌려준다."""
+    calls = []
+
+    def invoke(step, preamble):
+        calls.append((step["step"], preamble))
+        actions[len(calls) - 1](step)
+
+    runner._invoke_claude = invoke
+    return calls
+
+
+def run_phase(runner, root):
+    with patch.object(ex, "ROOT", root), patch.object(ex.shutil, "which", return_value="/usr/bin/true"):
+        runner.run()
+
+
+def wait_dead(pid, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.fixture
+def repo(tmp_path):
+    """git 저장소 안에 step 2개짜리 phase를 둔 프로젝트. AC는 a.txt, b.txt에 ok가 있는지 확인한다."""
+    root = tmp_path / "proj"
+    d = root / "phases" / "0-mvp"
+    d.mkdir(parents=True)
+    (root / "CLAUDE.md").write_text("# Rules")
+    index = {
+        "project": "T",
+        "phase": "mvp",
+        "steps": [
+            {"step": 0, "name": "first", "status": "pending"},
+            {"step": 1, "name": "second", "status": "pending"},
+        ],
+    }
+    (d / "index.json").write_text(json.dumps(index, indent=2))
+    (d / "step0.md").write_text(ac_step(0, "first", "grep -q ok a.txt"))
+    (d / "step1.md").write_text(ac_step(1, "second", "grep -q ok b.txt"))
+    git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.name", "test")
+    git(root, "config", "user.email", "test@example.com")
+    git(root, "config", "commit.gpgsign", "false")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "init")
+    return root
+
+
+@pytest.fixture
+def runner(repo):
+    with patch.object(ex, "ROOT", repo):
+        return ex.StepExecutor("0-mvp")
+
+
+# ---------------------------------------------------------------------------
+# AC 추출
+# ---------------------------------------------------------------------------
+
+class TestExtractAc:
+    def test_returns_block(self):
+        ac = "python3 -m pytest tests/test_a.py -q\nnpm test"
+        assert extract(ac_step(0, "a", ac)) == ac
+
+    def test_missing_header(self):
+        with pytest.raises(ValueError, match="Acceptance Criteria"):
+            extract("# Step 0\n\n```bash\nnpm test\n```\n")
+
+    def test_no_block(self):
+        with pytest.raises(ValueError, match="0개"):
+            extract("## Acceptance Criteria\n\nnpm test 통과\n")
+
+    def test_two_blocks(self):
+        md = "## Acceptance Criteria\n\n```bash\nnpm test\n```\n\n```bash\nnpm run build\n```\n"
+        with pytest.raises(ValueError, match="2개"):
+            extract(md)
+
+    def test_empty_block(self):
+        with pytest.raises(ValueError, match="비어"):
+            extract("## Acceptance Criteria\n\n```bash\n\n```\n")
+
+    def test_comment_only_block_is_empty(self):
+        with pytest.raises(ValueError, match="비어"):
+            extract(ac_step(0, "a", "# 나중에 채움"))
+
+    def test_unclosed_fence(self):
+        with pytest.raises(ValueError, match="닫히지"):
+            extract("## Acceptance Criteria\n\n```bash\nnpm test\n\n## 검증 절차\n")
+
+    def test_dangerous_command(self):
+        with pytest.raises(ValueError, match="rm -rf"):
+            extract(ac_step(0, "a", "npm test\nrm -rf dist"))
+
+    def test_block_in_next_section_not_counted(self):
+        md = ac_step(0, "a", "npm test") + "\n```bash\nnpm run e2e\n```\n"
+        assert extract(md) == "npm test"
+
+    def test_bash_comment_inside_block_does_not_end_section(self):
+        ac = "## 핵심 동작\npython3 -m pytest tests/test_a.py -q"
+        assert extract(ac_step(0, "a", ac)) == ac
+
+
+class TestLoadAcs:
+    def test_freezes_unconfirmed_steps(self, runner):
+        runner._load_acs()
+        assert runner._acs == {0: "grep -q ok a.txt", 1: "grep -q ok b.txt"}
+
+    def test_reports_all_errors_at_once(self, runner, repo, capsys):
+        d = repo / "phases" / "0-mvp"
+        (d / "step0.md").write_text("# Step 0\n\nAC 없음\n")
+        (d / "step1.md").write_text(ac_step(1, "second", "git reset --hard HEAD"))
+        with pytest.raises(SystemExit) as e:
+            runner._load_acs()
+        assert e.value.code == 1
+        out = capsys.readouterr().out
+        assert "Step 0" in out and "Step 1" in out
+
+    def test_missing_step_file(self, runner, repo, capsys):
+        (repo / "phases" / "0-mvp" / "step1.md").unlink()
+        with pytest.raises(SystemExit):
+            runner._load_acs()
+        assert "step1.md" in capsys.readouterr().out
+
+    def test_skips_confirmed_steps(self, runner, repo):
+        report(repo, 0, "completed", completed_at="2026-01-01T00:00:00+0900")
+        (repo / "phases" / "0-mvp" / "step0.md").write_text("# Step 0\n\n옛 형식, AC 없음\n")
+        runner._load_acs()
+        assert runner._acs == {1: "grep -q ok b.txt"}
+
+
+# ---------------------------------------------------------------------------
+# AC 게이트
+# ---------------------------------------------------------------------------
+
+class TestRunAc:
+    def test_pass_runs_in_root_with_trace(self, runner, repo):
+        r = runner._run_ac("echo hello\npwd -P")
+        assert r["exitCode"] == 0 and r["timedOut"] is False
+        assert "+ echo hello" in r["output"]
+        assert os.path.realpath(repo) in r["output"]
+        assert r["elapsed"] >= 0
+
+    def test_middle_command_failure(self, runner):
+        r = runner._run_ac("false\necho after")
+        assert r["exitCode"] == 1
+        assert "after" not in r["output"]
+
+    def test_pipe_head_failure(self, runner):
+        r = runner._run_ac("false | cat")
+        assert r["exitCode"] != 0
+
+    def test_timeout_kills_process_group(self, runner, tmp_path):
+        runner.AC_TIMEOUT = 1
+        pidfile = tmp_path / "pid"
+        r = runner._run_ac(f"sleep 30 &\necho $! > {shlex.quote(str(pidfile))}\nwait")
+        assert r["timedOut"] is True
+        assert r["elapsed"] < 10
+        assert wait_dead(int(pidfile.read_text()))
+
+    def test_interrupt_kills_process_group(self, runner, tmp_path):
+        pidfile = tmp_path / "pid"
+
+        class InterruptedPopen(subprocess.Popen):
+            def communicate(self, *args, **kwargs):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline and not (pidfile.exists() and pidfile.read_text().strip()):
+                    time.sleep(0.01)
+                raise KeyboardInterrupt
+
+        with patch.object(ex.subprocess, "Popen", InterruptedPopen):
+            with pytest.raises(KeyboardInterrupt):
+                runner._run_ac(f"sleep 30 &\necho $! > {shlex.quote(str(pidfile))}\nwait")
+        assert wait_dead(int(pidfile.read_text()))
+
+    def test_cannot_run(self, runner):
+        with patch.object(ex.subprocess, "Popen", side_effect=FileNotFoundError("bash")):
+            r = runner._run_ac("true")
+        assert r["exitCode"] is None
+        assert "bash" in r["output"]
+
+
+class TestCheckTools:
+    @pytest.mark.parametrize("missing", ["claude", "git"])
+    def test_missing_tool_exits(self, runner, missing, capsys):
+        with patch.object(ex.shutil, "which", side_effect=lambda t: None if t == missing else f"/usr/bin/{t}"):
+            with pytest.raises(SystemExit) as e:
+                runner._check_tools()
+        assert e.value.code == 1
+        assert missing in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# 강제 장치
+# ---------------------------------------------------------------------------
+
+class TestEnforcement:
+    @staticmethod
+    def run_step0(runner, repo):
+        runner._load_acs()
+        runner._execute_single_step(read_index(repo)["steps"][0], "")
+
+    def test_agent_cannot_confirm_or_touch_other_steps(self, runner, repo):
+        def forge(step):
+            (repo / "a.txt").write_text("bad")
+            report(repo, 0, "completed", summary="x", completed_at="forged")
+            report(repo, 1, "completed", summary="y", completed_at="forged")
+
+        runner.MAX_RETRIES = 1
+        fake_agent(runner, forge)
+        with pytest.raises(SystemExit):
+            self.run_step0(runner, repo)
+        s0, s1 = read_index(repo)["steps"]
+        assert s0["status"] == "error" and "completed_at" not in s0
+        assert s1 == {"step": 1, "name": "second", "status": "pending"}
+
+    def test_broken_json_means_no_change(self, runner, repo):
+        def corrupt(step):
+            (repo / "phases" / "0-mvp" / "index.json").write_text("{broken")
+
+        calls = fake_agent(runner, corrupt, work(repo, "a.txt", "ok"))
+        self.run_step0(runner, repo)
+        assert "Step did not update status" in calls[1][1]
+        assert read_index(repo)["steps"][0]["completed_at"]
+
+    def test_agent_commit_is_soft_reset(self, runner, repo, capsys):
+        def commit(step):
+            work(repo, "a.txt", "ok")(step)
+            git(repo, "add", "a.txt")
+            git(repo, "commit", "-qm", "agent commit")
+
+        fake_agent(runner, commit)
+        self.run_step0(runner, repo)
+        assert log(repo) == ["chore(mvp): step 0 output", "feat(mvp): step 0 — first", "init"]
+        assert "a.txt" in git(repo, "show", "--name-only", "--format=", "HEAD~1")
+        assert "reset --soft" in capsys.readouterr().out
+
+    def test_changed_ac_is_judged_by_frozen_copy(self, runner, repo):
+        def cheat(step):
+            (repo / "phases" / "0-mvp" / "step0.md").write_text(ac_step(0, "first", "true"))
+            report(repo, 0, "completed", summary="x")
+
+        runner.MAX_RETRIES = 1
+        fake_agent(runner, cheat)
+        with pytest.raises(SystemExit):
+            self.run_step0(runner, repo)
+        assert read_index(repo)["steps"][0]["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# 시도 흐름
+# ---------------------------------------------------------------------------
+
+class TestFlow:
+    def test_completes_all_steps(self, runner, repo):
+        calls = fake_agent(runner, work(repo, "a.txt", "ok"), work(repo, "b.txt", "ok"))
+        run_phase(runner, repo)
+        idx = read_index(repo)
+        assert [c[0] for c in calls] == [0, 1]
+        assert all(s.get("completed_at") for s in idx["steps"])
+        assert "completed_at" in idx
+        assert log(repo) == [
+            "chore(mvp): mark phase completed",
+            "chore(mvp): step 1 output",
+            "feat(mvp): step 1 — second",
+            "chore(mvp): step 0 output",
+            "feat(mvp): step 0 — first",
+            "init",
+        ]
+        out = json.loads((repo / "phases" / "0-mvp" / "step0-output.json").read_text())
+        assert out["ac"]["exitCode"] == 0
+
+    def test_gate_failure_is_retried_with_ac_output(self, runner, repo):
+        calls = fake_agent(
+            runner, work(repo, "a.txt", "bad"), work(repo, "a.txt", "ok"), work(repo, "b.txt", "ok")
+        )
+        run_phase(runner, repo)
+        assert [c[0] for c in calls] == [0, 0, 1]
+        assert "AC 실패 (exit 1)" in calls[1][1]
+        assert "+ grep -q ok a.txt" in calls[1][1]
+        assert "completed_at" in read_index(repo)
+
+    def test_last_failure_leaves_no_commit(self, runner, repo):
+        fake_agent(runner, *[work(repo, "a.txt", "bad")] * 3)
+        with pytest.raises(SystemExit) as e:
+            run_phase(runner, repo)
+        assert e.value.code == 1
+        s0 = read_index(repo)["steps"][0]
+        assert s0["status"] == "error"
+        assert "failed_at" in s0 and "completed_at" not in s0
+        assert "AC 실패" in s0["error_message"]
+        assert log(repo) == ["init"]
+        assert (repo / "a.txt").read_text() == "bad"
+
+    def test_blocked_exits_2(self, runner, repo):
+        fake_agent(runner, lambda step: report(repo, 0, "blocked", blocked_reason="API 키 필요"))
+        with pytest.raises(SystemExit) as e:
+            run_phase(runner, repo)
+        assert e.value.code == 2
+        s0 = read_index(repo)["steps"][0]
+        assert s0["status"] == "blocked" and "blocked_at" in s0
+
+    def test_claude_timeout_counts_as_attempt(self, runner, repo):
+        def hang(step):
+            raise subprocess.TimeoutExpired("claude", 1800)
+
+        calls = fake_agent(runner, hang, work(repo, "a.txt", "ok"), work(repo, "b.txt", "ok"))
+        run_phase(runner, repo)
+        assert [c[0] for c in calls] == [0, 0, 1]
+        assert "호출 시간 초과" in calls[1][1]
+
+
+# ---------------------------------------------------------------------------
+# 재개와 마무리
+# ---------------------------------------------------------------------------
+
+class TestResume:
+    def test_reported_step_is_confirmed_by_gate_only(self, runner, repo):
+        report(repo, 0, "completed", summary="a.txt 작성")
+        (repo / "a.txt").write_text("ok")
+        calls = fake_agent(runner, work(repo, "b.txt", "ok"))
+        run_phase(runner, repo)
+        assert [c[0] for c in calls] == [1]
+        assert read_index(repo)["steps"][0]["completed_at"]
+        assert "feat(mvp): step 0 — first" in log(repo)
+
+    def test_failed_regate_continues_with_agent(self, runner, repo):
+        report(repo, 0, "completed", summary="a.txt 작성")
+        (repo / "a.txt").write_text("bad")
+        calls = fake_agent(runner, work(repo, "a.txt", "ok"), work(repo, "b.txt", "ok"))
+        run_phase(runner, repo)
+        assert [c[0] for c in calls] == [0, 1]
+        assert "AC 실패 (exit 1)" in calls[0][1]
+
+    def test_interrupt_during_gate_then_resume(self, runner, repo):
+        fake_agent(runner, work(repo, "a.txt", "ok"))
+        with patch.object(runner, "_run_ac", side_effect=KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
+                run_phase(runner, repo)
+        s0 = read_index(repo)["steps"][0]
+        assert s0["status"] == "completed" and "completed_at" not in s0
+
+        with patch.object(ex, "ROOT", repo):
+            again = ex.StepExecutor("0-mvp")
+        calls = fake_agent(again, work(repo, "b.txt", "ok"))
+        run_phase(again, repo)
+        assert [c[0] for c in calls] == [1]
+        assert read_index(repo)["steps"][0]["completed_at"]
+
+    def test_legacy_completed_at_is_accepted(self, runner, repo):
+        report(repo, 0, "completed", summary="old", completed_at="2026-01-01T00:00:00+0900")
+        (repo / "phases" / "0-mvp" / "step0.md").write_text("# Step 0\n\n옛 형식, AC 없음\n")
+        calls = fake_agent(runner, work(repo, "b.txt", "ok"))
+        run_phase(runner, repo)
+        assert [c[0] for c in calls] == [1]
+        assert read_index(repo)["steps"][0]["completed_at"] == "2026-01-01T00:00:00+0900"
+
+    def test_step_reset_to_pending_after_ac_change_reruns(self, runner, repo):
+        """복구 안내: AC를 고치면 완료된 step도 pending으로 되돌린다. 남아 있는 옛 completed_at은 확정이 아니다."""
+        report(repo, 0, "pending", summary="old", completed_at="2026-01-01T00:00:00+0900")
+        calls = fake_agent(runner, work(repo, "a.txt", "ok"), work(repo, "b.txt", "ok"))
+        run_phase(runner, repo)
+        assert [c[0] for c in calls] == [0, 1]
+        assert read_index(repo)["steps"][0]["completed_at"] != "2026-01-01T00:00:00+0900"
+
+    def test_finalize_requires_every_step_confirmed(self, runner, repo):
+        report(repo, 0, "completed", summary="x", completed_at="2026-01-01T00:00:00+0900")
+        report(repo, 1, "completed", summary="y")
+        with pytest.raises(SystemExit) as e:
+            runner._finalize()
+        assert e.value.code == 1
+        assert "completed_at" not in read_index(repo)
+        assert log(repo) == ["init"]
