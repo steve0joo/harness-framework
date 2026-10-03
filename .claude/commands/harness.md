@@ -228,7 +228,7 @@ execute.py가 자동으로 처리하는 것:
 에러 복구:
 
 - **실패한 코드는 커밋되지 않고 working tree에 남는다.** `git status`로 새 파일까지 확인하고, `git diff`로 내용을 확인한다.
-- **이어서 고치려면**: 코드를 그대로 두고 `phases/{task-name}/index.json`에서 해당 step의 `status`를 `"pending"`으로 바꾸고 `error_message`를 삭제한 뒤 재실행한다.
-- **버리려면**: 사용자가 직접 `git restore`, `git clean`을 실행한 뒤 위처럼 `pending`으로 되돌린다. Bash 가드가 에이전트의 `git clean -f`를 막는다.
+- **이어서 고치려면**: 코드를 그대로 두고 `phases/{task-name}/index.json`에서 해당 step의 `status`만 `"pending"`으로 바꿔 재실행한다. 남겨 둔 `error_message`는 첫 시도 프롬프트에 이전 실패 내용으로 들어간다.
+- **버리려면**: 사용자가 직접 `git restore`, `git clean`을 실행하고, `status`를 `"pending"`으로 바꾸고 `error_message`를 삭제한 뒤 재실행한다. Bash 가드가 에이전트의 `git clean -f`를 막는다.
 - **AC를 고쳤다면**: 이미 완료된 step이라도 해당 step의 `status`를 `"pending"`으로 되돌린다. 실행기는 AC가 바뀌었는지 비교하지 않으므로, 되돌리지 않으면 옛 AC 기준의 완료가 그대로 남는다.
 - **blocked 발생 시**: `blocked_reason`에 적힌 사유를 해결한 뒤, `status`를 `"pending"`으로 바꾸고 `blocked_reason`을 삭제한 뒤 재실행한다.

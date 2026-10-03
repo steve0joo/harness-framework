@@ -275,11 +275,13 @@ class TestBuildPreamble:
     def test_no_retry_section_by_default(self, executor):
         result = executor._build_preamble("", "")
         assert "이전 시도 실패" not in result
+        assert "working tree" not in result
 
     def test_retry_section_with_prev_error(self, executor):
         result = executor._build_preamble("", "", prev_error="타입 에러 발생")
         assert "이전 시도 실패" in result
         assert "타입 에러 발생" in result
+        assert "커밋되지 않은 채 working tree에 남아 있다" in result
 
     def test_retry_budget_not_delegated_to_agent(self, executor):
         result = executor._build_preamble("", "")
@@ -1015,6 +1017,14 @@ class TestResume:
         run_phase(again, repo)
         assert [c[0] for c in calls] == [1]
         assert read_index(repo)["steps"][0]["completed_at"]
+
+    def test_leftover_error_message_is_passed_to_first_attempt(self, runner, repo):
+        """복구 안내: 이어서 고칠 때는 status만 pending으로 바꾼다. 남은 error_message가 첫 시도에 전달된다."""
+        report(repo, 0, "pending", error_message="[3회 시도 후 실패] AC 실패 (exit 1)\n\n+ grep -q ok a.txt")
+        calls = fake_agent(runner, work(repo, "a.txt", "ok"), work(repo, "b.txt", "ok"))
+        run_phase(runner, repo)
+        assert "+ grep -q ok a.txt" in calls[0][1]
+        assert "error_message" not in read_index(repo)["steps"][0]
 
     def test_legacy_completed_at_is_accepted(self, runner, repo):
         report(repo, 0, "completed", summary="old", completed_at="2026-01-01T00:00:00+0900")

@@ -231,6 +231,8 @@ class StepExecutor:
         if prev_error:
             retry_section = (
                 f"\n## ⚠ 이전 시도 실패 — 아래 에러를 반드시 참고하여 수정하라\n\n"
+                f"이전 시도의 변경은 커밋되지 않은 채 working tree에 남아 있다. "
+                f"`git status`와 `git diff`로 확인하고 이어서 고쳐라.\n\n"
                 f"{prev_error}\n\n---\n\n"
             )
         return (
@@ -580,7 +582,8 @@ class StepExecutor:
                 print("\n  All steps completed!")
                 return
 
-            prev_error = None
+            # 사용자가 pending으로 되돌리며 남겨 둔 지난 실행의 실패 내용을 첫 시도에 넘긴다
+            prev_error = step.pop("error_message", None)
             if step["status"] == "completed":
                 # 완료 보고 뒤 확정 전에 중단된 step: 에이전트 없이 게이트만 다시 돌린다
                 prev_error = self._gate(step["step"])
